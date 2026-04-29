@@ -91,7 +91,9 @@ You have access to the following tools:
 {tools}
 
 Follow this format exactly:
-
+IMPORTANT:
+- In one turn, output either an Action block or a Final Answer, never both.
+- Action Input must be plain text and on a new line.
 Question: the user's input question
 Thought: think about what to do next
 Action: the action to take, should be one of [{tool_names}]
@@ -123,6 +125,8 @@ def build_llm() -> CompatibleChatOpenAI:
         "api_key": api_key,
         "model": model,
         "temperature": 0,
+        "timeout": 60,
+        "max_retries": 2,
     }
     if base_url:
         kwargs["base_url"] = base_url
@@ -146,8 +150,8 @@ def create_agent() -> AgentExecutor:
         agent=agent,
         tools=TOOLS,
         verbose=True,
-        max_iterations=5,
-        handle_parsing_errors=True,
+        max_iterations=3,
+        handle_parsing_errors="输出格式错误：请严格按 ReAct 格式，只返回一个 Action 或 Final Answer，不要同时返回两者。",
     )
 
 
@@ -170,8 +174,22 @@ def main() -> None:
     for question in test_questions:
         print(f"\nUser: {question}")
         print("-" * 40)
-        result = agent.invoke({"input": question})
-        print(f"\nAgent: {result['output']}")
+
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                result = agent.invoke({"input": question})
+                print(f"\nAgent: {result['output']}")
+                last_error = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                print(f"[Attempt {attempt}/3] request failed: {type(exc).__name__}: {exc}")
+                if attempt < 3:
+                    print("Retrying...")
+
+        if last_error is not None:
+            print("Skip this question due to repeated upstream failures.")
 
     print("\n" + "=" * 50)
     print("Demo finished")
